@@ -4,39 +4,100 @@ import pygame
 import random
 import threading
 
-# ================== Snake Game (pygame) =====================
-
+# ================== Setup (Pygame) =====================
 pygame.init()
-width, height = 1280, 960
+width, height = 1080, 720
 win = pygame.display.set_mode((width, height))
+pygame.display.set_caption("Head-Controlled Snake 🐍")
 clock = pygame.time.Clock()
-font = pygame.font.SysFont(None, 35)
+font = pygame.font.SysFont(None, 40)
 
 snake_block = 20
 snake_speed = 8
 
+# Shared direction variable
+current_direction = "RIGHT"
+tracking_started = threading.Event()  # signals that face tracking started
+
+
+# ================== Helper Functions =====================
 
 def draw_snake(snake_list):
     for x in snake_list:
         pygame.draw.rect(win, (0, 255, 0), [x[0], x[1], snake_block, snake_block])
 
 
-def message(msg, color):
+def message(msg, color, x=None, y=None):
     mesg = font.render(msg, True, color)
-    win.blit(mesg, [width / 6, height / 3])
+    if x is None or y is None:
+        x, y = width / 6, height / 3
+    win.blit(mesg, [x, y])
 
 
-# Shared direction and tracking signal
-current_direction = "RIGHT"
-tracking_started = threading.Event()  # ✅ used to signal that face tracking started
+def draw_button(text, x, y, w, h, color, hover_color):
+    """Draws a clickable button; returns True if clicked."""
+    mouse = pygame.mouse.get_pos()
+    click = pygame.mouse.get_pressed()
+    action = False
+
+    if x + w > mouse[0] > x and y + h > mouse[1] > y:
+        pygame.draw.rect(win, hover_color, (x, y, w, h))
+        if click[0] == 1:
+            action = True
+    else:
+        pygame.draw.rect(win, color, (x, y, w, h))
+
+    text_surface = font.render(text, True, (255, 255, 255))
+    text_rect = text_surface.get_rect(center=(x + w / 2, y + h / 2))
+    win.blit(text_surface, text_rect)
+    return action
+
+
+# ================== Game Logic =====================
+
+def show_game_over_screen(score):
+    """Displays a fail screen with score and restart/quit buttons."""
+    waiting = True
+    while waiting:
+        win.fill((20, 20, 20))
+        message(f"💀 Game Over! Your Score: {score}", (255, 0, 0), width / 4, height / 3)
+
+        restart_clicked = draw_button("Restart", width / 4, height / 1.8, 200, 60,
+                                      (0, 128, 0), (0, 200, 0))
+        quit_clicked = draw_button("Quit", width / 1.8, height / 1.8, 200, 60,
+                                   (128, 0, 0), (200, 0, 0))
+
+        pygame.display.update()
+
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                cv2.destroyAllWindows()
+                exit()
+            if event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_q:
+                    pygame.quit()
+                    cv2.destroyAllWindows()
+                    exit()
+                if event.key == pygame.K_r:
+                    return True
+
+        if restart_clicked:
+            return True
+        elif quit_clicked:
+            pygame.quit()
+            cv2.destroyAllWindows()
+            exit()
+
+        clock.tick(15)
 
 
 def game_loop():
+    """Runs one game round."""
     global current_direction
 
     x1 = width // 2
     y1 = height // 2
-
     x1_change = snake_block
     y1_change = 0
 
@@ -46,14 +107,17 @@ def game_loop():
     foodx = round(random.randrange(0, width - snake_block) / 20.0) * 20.0
     foody = round(random.randrange(0, height - snake_block) / 20.0) * 20.0
 
+    score = 0
     game_over = False
 
     while not game_over:
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
-                game_over = True
+                pygame.quit()
+                cv2.destroyAllWindows()
+                exit()
 
-        # Update direction from head tracking
+        # Movement direction (based on tracking)
         if current_direction == "LEFT" and x1_change == 0:
             x1_change = -snake_block
             y1_change = 0
@@ -86,97 +150,50 @@ def game_loop():
                 game_over = True
 
         draw_snake(snake_list)
+
+        # Display score
+        score_text = font.render(f"Score: {score}", True, (255, 255, 255))
+        win.blit(score_text, [10, 10])
+
         pygame.display.update()
 
         if x1 == foodx and y1 == foody:
             foodx = round(random.randrange(0, width - snake_block) / 20.0) * 20.0
             foody = round(random.randrange(0, height - snake_block) / 20.0) * 20.0
             length_of_snake += 1
+            score += 1
 
         clock.tick(snake_speed)
 
-    pygame.quit()
+    # Show fail screen
+    return show_game_over_screen(score)
+
+
+def run_interactive_game():
+    """Main loop that handles restarting/ending."""
+    while True:
+        restart = game_loop()
+        if not restart:
+            break
 
 
 # ================== Head Tracking (OpenCV + Mediapipe) =====================
-
-# def head_tracker():
-#     global current_direction
-
-#     mp_face_mesh = mp.solutions.face_mesh
-#     face_mesh = mp_face_mesh.FaceMesh()
-#     cap = cv2.VideoCapture(0)
-
-#     while True:
-#         success, image = cap.read()
-#         if not success:
-#             continue
-
-#         image_rgb = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-#         results = face_mesh.process(image_rgb)
-
-#         if results.multi_face_landmarks:
-#             for face_landmarks in results.multi_face_landmarks:
-#                 # Nose tip landmark (index 1)
-#                 nose = face_landmarks.landmark[1]
-#                 nose_x = nose.x
-#                 nose_y = nose.y
-
-#                 # ✅ Trigger tracking event on first valid nose detection
-#                 if not tracking_started.is_set():
-#                     print("✅ Face tracking detected! Starting game...")
-#                     tracking_started.set()
-
-#                 # Centered around 0.5, adjust sensitivity
-#                 if nose_x < 0.55:
-#                     current_direction = "LEFT"
-#                 elif nose_x > 0.45:
-#                     current_direction = "RIGHT"
-#                 elif nose_y < 0.47:
-#                     current_direction = "UP"
-#                 elif nose_y > 0.60:
-#                     current_direction = "DOWN"
-
-#                 break  # We only need the first detected face
-
-#         # Show webcam feed with debug info
-#         cv2.putText(image,
-#                     f'Direction: {current_direction}',
-#                     (10, 30),
-#                     cv2.FONT_HERSHEY_SIMPLEX,
-#                     1, (0, 255, 0), 2)
-
-#         if not tracking_started.is_set():
-#             cv2.putText(image,
-#                         "Waiting for face...",
-#                         (10, 70),
-#                         cv2.FONT_HERSHEY_SIMPLEX,
-#                         1, (0, 0, 255), 2)
-
-#         cv2.imshow('Head Direction Tracker', image)
-
-#         if cv2.waitKey(1) & 0xFF == ord('q'):
-#             break
-
-#     cap.release()
-#     cv2.destroyAllWindows()
 
 def head_tracker():
     global current_direction
 
     mp_face_mesh = mp.solutions.face_mesh
     face_mesh = mp_face_mesh.FaceMesh(
-        refine_landmarks=True,  # improves landmark precision
+        refine_landmarks=True,
         max_num_faces=1,
         min_detection_confidence=0.5,
         min_tracking_confidence=0.5
     )
     cap = cv2.VideoCapture(0)
 
-    # Use a small buffer to smooth nose motion
-    recent_x = []
-    recent_y = []
+    recent_x, recent_y = [], []
     SMOOTHING_FRAMES = 5
+    DEAD_ZONE = 0.07  # sensitivity around center
 
     while True:
         success, image = cap.read()
@@ -189,10 +206,9 @@ def head_tracker():
         if results.multi_face_landmarks:
             for face_landmarks in results.multi_face_landmarks:
                 nose = face_landmarks.landmark[1]
-                nose_x = nose.x
-                nose_y = nose.y
+                nose_x, nose_y = nose.x, nose.y
 
-                # Add to smoothing buffer
+                # Smooth motion
                 recent_x.append(nose_x)
                 recent_y.append(nose_y)
                 if len(recent_x) > SMOOTHING_FRAMES:
@@ -202,14 +218,12 @@ def head_tracker():
                 avg_x = sum(recent_x) / len(recent_x)
                 avg_y = sum(recent_y) / len(recent_y)
 
-                # Signal start once we have stable readings
+                # Signal tracking start
                 if not tracking_started.is_set():
                     print("✅ Face tracking detected! Starting game...")
                     tracking_started.set()
 
-                # Add a dead zone in the middle to prevent flicker
-                DEAD_ZONE = 0.07  # ~7% of the frame center zone
-
+                # Determine direction
                 if avg_x < 0.5 - DEAD_ZONE:
                     current_direction = "RIGHT"
                 elif avg_x > 0.5 + DEAD_ZONE:
@@ -219,26 +233,17 @@ def head_tracker():
                 elif avg_y > 0.5 + DEAD_ZONE:
                     current_direction = "DOWN"
 
-                # Draw debug info
+                # Debug nose display
                 h, w, _ = image.shape
-                nose_px = int(nose_x * w)
-                nose_py = int(nose_y * h)
-                cv2.circle(image, (nose_px, nose_py), 5, (0, 255, 255), -1)
+                cv2.circle(image, (int(nose_x * w), int(nose_y * h)), 5, (0, 255, 255), -1)
+                break
 
-                break  # only use first face
-
-        # Show info
-        cv2.putText(image,
-                    f'Direction: {current_direction}',
-                    (10, 30),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1, (0, 255, 0), 2)
-
+        # Debug info
+        cv2.putText(image, f'Direction: {current_direction}', (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         if not tracking_started.is_set():
-            cv2.putText(image, "Waiting for face...",
-                        (10, 70),
-                        cv2.FONT_HERSHEY_SIMPLEX,
-                        1, (0, 0, 255), 2)
+            cv2.putText(image, "Waiting for face...", (10, 70),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 0, 255), 2)
 
         cv2.imshow('Head Direction Tracker', image)
 
@@ -251,13 +256,16 @@ def head_tracker():
 
 # ================== Run Game & Tracker in Parallel =====================
 
-# Start the tracker thread
 tracker_thread = threading.Thread(target=head_tracker, daemon=True)
 tracker_thread.start()
 
-# Wait until face tracking is confirmed
 print("Waiting for valid face tracking to begin...")
-tracking_started.wait()  # <-- this blocks until Mediapipe detects a nose
+tracking_started.wait()  # wait for Mediapipe detection
 
-# Once valid tracking is detected, start the game
-game_loop()
+try:
+    run_interactive_game()
+except KeyboardInterrupt:
+    print("👋 Exiting gracefully...")
+finally:
+    pygame.quit()
+    cv2.destroyAllWindows()
